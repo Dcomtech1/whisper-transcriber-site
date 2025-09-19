@@ -7,7 +7,3 @@ services:
     envVars:
       - key: WHISPER_MODEL
         value: tiny   # default model, lightweight for free tier
-    disk:
-      name: outputs
-      mountPath: /app/outputs
-      sizeGB: 1
