@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: nova-transcribe
+    runtime: docker
+    rootDir: transcriber-app/backend
+    plan: free   # stays on Render free plan
+    envVars:
+      - key: WHISPER_MODEL
+        value: tiny   # default model, lightweight for free tier
+    disk:
+      name: outputs
+      mountPath: /app/outputs
+      sizeGB: 1
