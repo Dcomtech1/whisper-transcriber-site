@@ -2,7 +2,7 @@ services:
   - type: web
     name: nova-transcribe
     runtime: docker
-    rootDir: transcriber-app/backend
+    rootDir: .
     plan: free   # stays on Render free plan
     envVars:
       - key: WHISPER_MODEL
