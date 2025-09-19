@@ -1,0 +1,18 @@
+# Python junk
+__pycache__/
+*.pyc
+.venv/
+
+# App outputs
+outputs/
+*.docx
+*.mp3
+*.m4a
+*.wav
+*.mp4
+*.mkv
+
+# VCS & OS files
+.git
+.gitignore
+.DS_Store

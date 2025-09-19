@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nova Transcribe — Whisper UI</title>
+  <link rel="icon" href="/static/favicon.ico">
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <div class="brand">
+        <img src="/static/logo.svg" alt="Nova Transcribe" class="logo" />
+        <span class="title">Nova Transcribe</span>
+      </div>
+      <div class="header-right">
+        <button id="themeToggle" class="ghost" type="button">☾ Theme</button>
+        <a class="ghost" href="https://github.com/openai/whisper" target="_blank" rel="noreferrer">Whisper ↗</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <h1>Convert audio &amp; video to text — fast.</h1>
+      <p class="muted">Upload a file, pick a model, get a clean transcript with optional timestamps and a downloadable .docx.</p>
+    </section>
+
+    <section class="card">
+      <div class="grid-2">
+        <div>
+          <label class="label">File upload</label>
+
+          <div id="drop" class="dropzone">
+            <input type="file" id="file" accept="audio/*,video/*" />
+            <div class="drop-hint">
+              <strong>Drag &amp; drop</strong> your file here or <span class="linkish">browse</span>
+              <div class="hint muted">Supported: m4a, mp3, wav, mp4, mkv, mov, ...</div>
+            </div>
+          </div>
+
+          <div class="progress-wrap hidden">
+            <div class="progress-bar" id="progress"></div>
+            <div class="progress-text" id="progressText">0%</div>
+          </div>
+        </div>
+
+        <div class="controls">
+          <div class="field">
+            <label class="label">Model</label>
+            <div class="model-row">
+              <select id="model_size">
+                <option value="tiny">tiny (fastest)</option>
+                <option value="base" selected>base</option>
+                <option value="small">small</option>
+                <option value="medium">medium</option>
+                <option value="large">large (most accurate)</option>
+              </select>
+              <span class="badge" id="badgeDefault"></span>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="label">Task</label>
+            <select id="task">
+              <option value="transcribe" selected>Transcribe (keep language)</option>
+              <option value="translate">Translate to English</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label class="label">Temperature</label>
+            <input type="number" step="0.1" min="0" max="1" id="temperature" value="0.0" />
+          </div>
+
+          <div class="field checkbox">
+            <label>
+              <input type="checkbox" id="word_timestamps" />
+              Include word-level timestamps (slower)
+            </label>
+          </div>
+
+          <button id="submit" class="primary" type="button">Transcribe</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="status" class="status">Ready.</section>
+
+    <section id="result" class="card hidden">
+      <div class="result-meta">
+        <div><strong>File:</strong> <span id="metaFile">—</span></div>
+        <div><strong>Model:</strong> <span id="metaModel">—</span></div>
+        <div><strong>Language:</strong> <span id="metaLang">—</span></div>
+        <div><strong>Duration:</strong> <span id="metaDur">—</span></div>
+      </div>
+
+      <h2>Transcript</h2>
+      <pre id="text" class="transcript"></pre>
+
+      <div class="actions">
+        <a id="docx" class="btn" href="#" download>⬇️ Download .docx</a>
+        <button id="copy" class="ghost" type="button">Copy to clipboard</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container foot-inner">
+      <span>© <span id="year"></span> Nova Transcribe</span>
+      <span class="muted">Powered by Whisper · Built with FastAPI</span>
+    </div>
+  </footer>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script>
+    // Default model badge
+    const defaultModel = "{{ default_model }}";
+    document.getElementById('year').textContent = new Date().getFullYear();
+    document.getElementById('badgeDefault').textContent = 'default: ' + defaultModel;
+
+    // Simple theme toggle (no CSS tricks)
+    const themeToggle = document.getElementById('themeToggle');
+    if (localStorage.getItem('novaTheme') === 'light') document.documentElement.classList.add('light');
+    themeToggle.addEventListener('click', () => {
+      document.documentElement.classList.toggle('light');
+      localStorage.setItem('novaTheme', document.documentElement.classList.contains('light') ? 'light' : 'dark');
+    });
+
+    // Elements
+    const fileInput = document.getElementById('file');
+    const drop = document.getElementById('drop');
+    const submitBtn = document.getElementById('submit');
+    const statusEl = document.getElementById('status');
+    const resultEl = document.getElementById('result');
+    const textEl = document.getElementById('text');
+    const docxEl = document.getElementById('docx');
+    const toast = document.getElementById('toast');
+    const progressWrap = document.querySelector('.progress-wrap');
+    const progressBar = document.getElementById('progress');
+    const progressText = document.getElementById('progressText');
+    const modelSel = document.getElementById('model_size');
+
+    const metaFile = document.getElementById('metaFile');
+    const metaModel = document.getElementById('metaModel');
+    const metaLang = document.getElementById('metaLang');
+    const metaDur = document.getElementById('metaDur');
+
+    // Drag & drop
+    ['dragenter','dragover'].forEach(evt => drop.addEventListener(evt, e => {
+      e.preventDefault(); e.stopPropagation(); drop.classList.add('dragging');
+    }));
+    ['dragleave','drop'].forEach(evt => drop.addEventListener(evt, e => {
+      e.preventDefault(); e.stopPropagation(); drop.classList.remove('dragging');
+    }));
+    drop.addEventListener('click', () => fileInput.click());
+    drop.addEventListener('drop', (e) => {
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        fileInput.files = e.dataTransfer.files;
+      }
+    });
+
+    function showToast(msg) {
+      toast.textContent = msg;
+      toast.classList.remove('hidden');
+      setTimeout(() => toast.classList.add('hidden'), 2500);
+    }
+
+    function setProgress(val) {
+      progressWrap.classList.remove('hidden');
+      progressBar.style.width = val + '%';
+      progressText.textContent = val + '%';
+      if (val >= 100) setTimeout(() => progressWrap.classList.add('hidden'), 1200);
+    }
+
+    function formatSeconds(s) {
+      if (s == null) return '—';
+      var m = Math.floor(s / 60);
+      var r = Math.round(s % 60);
+      return (m ? (m + 'm ') : '') + r + 's';
+    }
+
+    function uploadWithProgress(formData) {
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/transcribe');
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            const pct = Math.min(99, Math.round((e.loaded / e.total) * 100));
+            setProgress(pct);
+          }
+        });
+        xhr.onload = () => {
+          try {
+            const data = JSON.parse(xhr.responseText);
+            if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+            else reject(data);
+          } catch {
+            reject({ error: 'Invalid server response' });
+          }
+        };
+        xhr.onerror = () => reject({ error: 'Network error' });
+        xhr.send(formData);
+      });
+    }
+
+    document.getElementById('copy').addEventListener('click', async () => {
+      const t = textEl.textContent || '';
+      if (!t) return;
+      try { await navigator.clipboard.writeText(t); showToast('Copied'); }
+      catch { showToast('Copy failed'); }
+    });
+
+    submitBtn.addEventListener('click', async () => {
+      const f = fileInput.files && fileInput.files[0];
+      if (!f) return showToast('Please select a file first');
+      resultEl.classList.add('hidden');
+      statusEl.textContent = 'Uploading & processing…';
+
+      const form = new FormData();
+      form.append('file', f);
+      form.append('model_size', modelSel.value);
+      form.append('task', document.getElementById('task').value);
+      form.append('temperature', document.getElementById('temperature').value);
+      form.append('word_timestamps', document.getElementById('word_timestamps').checked ? 'true' : '');
+
+      try {
+        const data = await uploadWithProgress(form);
+        setProgress(100);
+        textEl.textContent = data.text || '(No text produced)';
+        docxEl.href = data.docx_file;
+        metaFile.textContent = data.filename || '—';
+        metaModel.textContent = data.model || '—';
+        metaLang.textContent = data.language || '—';
+        metaDur.textContent = formatSeconds(data.duration_seconds);
+        resultEl.classList.remove('hidden');
+        statusEl.textContent = '✅ Done';
+      } catch (err) {
+        statusEl.textContent = '❌ Failed';
+        showToast(err.error || 'Something went wrong');
+      }
+    });
+  </script>
+</body>
+</html>

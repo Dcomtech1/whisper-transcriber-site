@@ -1,0 +1,16 @@
+fastapi==0.112.2
+uvicorn[standard]==0.30.6
+jinja2==3.1.4
+python-docx==1.2.0
+python-multipart==0.0.9
+
+# Whisper stack (stable, CPU-friendly)
+openai-whisper==20231117
+numpy<2
+numba==0.58.1
+llvmlite==0.41.1
+tiktoken==0.6.0
+
+# Torch CPU from the official CPU index
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.2.2

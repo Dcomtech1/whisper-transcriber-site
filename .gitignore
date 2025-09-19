@@ -1,0 +1,37 @@
+﻿# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+
+# --- Virtual envs ---
+.venv/
+venv/
+env/
+
+# --- App outputs & media ---
+**/outputs/
+*.docx
+*.mp3
+*.m4a
+*.wav
+*.mp4
+*.mkv
+*.mov
+
+# --- Whisper caches ---
+**/.cache/
+
+# --- OS/IDE junk ---
+.DS_Store
+Thumbs.db
+.vscode/
+.ipynb_checkpoints/
+
+# --- Builds ---
+dist/
+build/
