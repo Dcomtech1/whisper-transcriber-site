@@ -8,77 +8,76 @@ from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-import whisper
+from faster_whisper import WhisperModel
 from docx import Document
 
-app = FastAPI(title="Nova Transcribe")
+# -----------------------------
+# App setup
+# -----------------------------
+app = FastAPI(title="Nova Transcribe (Faster-Whisper)")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-DEFAULT_MODEL = os.getenv("WHISPER_MODEL", "base")
-MODEL = whisper.load_model(DEFAULT_MODEL)
+# -----------------------------
+# Model
+# -----------------------------
+DEFAULT_MODEL = os.getenv("WHISPER_MODEL", "tiny")
+# device="cpu" for free hosting; compute_type="int8" saves memory
+MODEL = WhisperModel(DEFAULT_MODEL, device="cpu", compute_type="int8")
 
 OUTPUT_DIR = "outputs"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+# -----------------------------
+# Routes
+# -----------------------------
 @app.get("/health")
 async def health():
     return {"ok": True, "model": DEFAULT_MODEL}
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "default_model": DEFAULT_MODEL})
+    return templates.TemplateResponse(
+        "index.html",
+        {"request": request, "default_model": DEFAULT_MODEL}
+    )
 
 @app.post("/api/transcribe")
 async def transcribe_api(
     file: UploadFile,
     model_size: str = Form(DEFAULT_MODEL),
-    task: str = Form("transcribe"),
-    temperature: float = Form(0.0),
+    beam_size: int = Form(5),
     word_timestamps: Optional[bool] = Form(False)
 ):
     global MODEL
 
-    # Save upload
     base_name = os.path.splitext(file.filename or "audio")[0]
     ext = os.path.splitext(file.filename or "")[1].lower() or ".wav"
     uid = uuid.uuid4().hex[:8]
     input_path = os.path.join(OUTPUT_DIR, f"{base_name}_{uid}{ext}")
+
     with open(input_path, "wb") as f:
         f.write(await file.read())
 
-    # Reload model if different
-    current_model_name = getattr(MODEL, 'name', DEFAULT_MODEL)
-    if model_size and model_size != current_model_name:
+    # reload model if user requested a different size
+    current_model = DEFAULT_MODEL
+    if model_size and model_size != current_model:
         try:
-            MODEL = whisper.load_model(model_size)
+            MODEL = WhisperModel(model_size, device="cpu", compute_type="int8")
+            current_model = model_size
         except Exception as e:
             return JSONResponse(status_code=400, content={"error": f"Failed to load model '{model_size}': {e}"})
 
-    # Transcribe
     try:
-        result = MODEL.transcribe(
-            input_path,
-            task=task,
-            temperature=temperature,
-            word_timestamps=bool(word_timestamps),
-        )
+        segments, info = MODEL.transcribe(input_path, beam_size=beam_size, word_timestamps=bool(word_timestamps))
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Transcription failed: {e}"})
 
-    text = (result.get("text") or "").strip()
-    segments = result.get("segments", []) or []
-    language = result.get("language", None)
+    text = " ".join([seg.text for seg in segments]).strip()
+    language = info.language if hasattr(info, "language") else None
+    duration = info.duration if hasattr(info, "duration") else None
 
-    # Approx duration from last segment end
-    duration = None
-    if segments:
-        try:
-            duration = float(segments[-1].get("end", 0.0))
-        except Exception:
-            duration = None
-
-    # Build DOCX
+    # Save as DOCX
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     docx_name = f"{base_name}_{ts}.docx"
     docx_path = os.path.join(OUTPUT_DIR, docx_name)
@@ -100,15 +99,6 @@ async def transcribe_api(
     if text:
         doc.add_paragraph(text)
 
-    if segments:
-        doc.add_page_break()
-        doc.add_heading("Segments", level=2)
-        for s in segments:
-            start = s.get("start", 0.0)
-            end = s.get("end", 0.0)
-            stext = (s.get("text") or "").strip()
-            doc.add_paragraph(f"[{start:.2f}s → {end:.2f}s] {stext}")
-
     doc.save(docx_path)
 
     return {
@@ -118,7 +108,6 @@ async def transcribe_api(
         "model": model_size,
         "language": language,
         "duration_seconds": duration,
-        "segments": segments,
         "filename": file.filename,
     }
 
